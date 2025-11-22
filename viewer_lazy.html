@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Traffic Analytics Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #map { width: 100%; height: 100vh; background: #1a1a1a; }
+        #panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: rgba(255,255,255,0.96); padding: 15px; width: 320px;
+            border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+            max-height: 90vh; overflow-y: auto;
+        }
+        h3 { margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        select, button { width: 100%; padding: 8px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ccc; }
+        label { font-weight: bold; font-size: 12px; color: #555; display: block; margin-top: 5px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px; }
+        .stat-box { background: #f8f9fa; padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #eee; }
+        .stat-val { font-size: 16px; font-weight: bold; display: block; }
+        .stat-lbl { font-size: 10px; color: #7f8c8d; }
+        .legend-bar { height: 8px; background: linear-gradient(to right, #e74c3c, #f1c40f, #2ecc71); margin: 8px 0; border-radius: 4px; }
+        #status { font-size: 12px; font-weight: bold; margin-top: 5px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="panel">
+        <h3><i class="fas fa-chart-line"></i> Traffic Dashboard</h3>
+        
+        <label>1. Chọn Dữ Liệu</label>
+        <div style="display:flex; gap:5px">
+            <select id="selDate"></select>
+            <select id="selHour"></select>
+        </div>
+        <button onclick="loadDataStream()" style="background:#2ecc71; color:white; font-weight:bold; cursor:pointer;">
+            <i class="fas fa-play"></i> Tải Dữ Liệu
+        </button>
+        <div id="status"></div>
+
+        <label>2. Bộ Lọc</label>
+        <div style="display:flex; justify-content:space-between; font-size:12px">
+            <span>Max Vận tốc: <b id="valSpeed" style="color:#2980b9">All</b></span>
+        </div>
+        <input type="range" id="rangeSpeed" min="5" max="60" value="60" step="5" style="width:100%" oninput="updateFilters()">
+        
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-top:5px">
+            <span>Min Số lượt: <b id="valCount" style="color:#2980b9">>= 1</b></span>
+        </div>
+        <input type="range" id="rangeCount" min="1" max="20" value="1" step="1" style="width:100%" oninput="updateFilters()">
+
+        <div class="stats-grid">
+            <div class="stat-box"><span class="stat-val" id="statEdges">0</span><span class="stat-lbl">Đoạn</span></div>
+            <div class="stat-box"><span class="stat-val" id="statSpeed">0</span><span class="stat-lbl">Km/h</span></div>
+            <div class="stat-box"><span class="stat-val" id="statCongested" style="color:red">0</span><span class="stat-lbl">Điểm Tắc</span></div>
+            <div class="stat-box"><span class="stat-val" id="statTrips">0</span><span class="stat-lbl">Lượt Xe</span></div>
+        </div>
+        
+        <label>Chú thích Vận tốc</label>
+        <div class="legend-bar"></div>
+        <div style="display:flex; justify-content:space-between; font-size:10px; color:#666">
+            <span>&lt; 10 km/h (Tắc)</span><span>&gt; 45 km/h (Thoáng)</span>
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        var map = L.map('map', { preferCanvas: true }).setView([10.776, 106.700], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'OSM' }).addTo(map);
+        var myRenderer = L.canvas({ padding: 0.5 });
+        var layerNodes = L.layerGroup().addTo(map);
+        var layerEdges = L.layerGroup().addTo(map);
+
+        var nodesMeta = {}, indexData = {}, currentRawEdges = [], abortController = null;
+
+        async function init() {
+            try {
+                let r1 = await fetch('traffic_data_chunks/nodes.json');
+                if(!r1.ok) throw new Error("Thiếu nodes.json");
+                nodesMeta = await r1.json();
+                
+                let r2 = await fetch('traffic_data_chunks/index.json');
+                if(!r2.ok) throw new Error("Thiếu index.json");
+                indexData = await r2.json();
+                
+                populateDates();
+                document.getElementById('status').innerText = "Sẵn sàng";
+                document.getElementById('status').style.color = "#2ecc71";
+                
+                // Vẽ nodes
+                setTimeout(() => {
+                    for (let id in nodesMeta) {
+                        let n = nodesMeta[id];
+                        L.circleMarker([n.lat, n.lng], { radius: 1, color: '#555', fillColor:'#777', fillOpacity:0.5, renderer: myRenderer, interactive: false }).addTo(layerNodes);
+                    }
+                }, 100);
+            } catch(e) { document.getElementById('status').innerText = "Lỗi: " + e.message; document.getElementById('status').style.color = "red"; }
+        }
+
+        function populateDates() {
+            let selDate = document.getElementById('selDate');
+            let dates = Object.keys(indexData).sort();
+            // Đưa MONTH_AVG lên đầu
+            if(indexData["MONTH_AVG"]) {
+                let opt = document.createElement('option');
+                opt.value = "MONTH_AVG"; opt.innerText = "⭐ TB Cả Tháng"; opt.style.fontWeight="bold"; opt.style.color="#d35400";
+                selDate.appendChild(opt);
+                dates = dates.filter(d => d !== "MONTH_AVG");
+            }
+            dates.forEach(d => {
+                let o = document.createElement('option'); o.value = d; o.innerText = d; selDate.appendChild(o);
+            });
+            selDate.onchange = populateHours;
+            populateHours();
+        }
+
+        function populateHours() {
+            let d = document.getElementById('selDate').value;
+            let selHour = document.getElementById('selHour');
+            selHour.innerHTML = "";
+            let hours = indexData[d] || [];
+            hours.sort((a,b)=>a-b).forEach(h => {
+                let o = document.createElement('option'); o.value = h; o.innerText = h + ":00"; selHour.appendChild(o);
+            });
+        }
+
+        async function loadDataStream() {
+            let d = document.getElementById('selDate').value, h = document.getElementById('selHour').value;
+            if(!d || !h) return;
+            if(abortController) abortController.abort();
+            abortController = new AbortController();
+
+            document.getElementById('status').innerText = "Đang tải...";
+            currentRawEdges = [];
+            layerEdges.clearLayers();
+
+            try {
+                const res = await fetch(`traffic_data_chunks/${d}_${h}.ndjson`, { signal: abortController.signal });
+                if(!res.ok) throw new Error("File không tồn tại");
+                
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while(true) {
+                    const { value, done } = await reader.read();
+                    if(done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for(let line of lines) {
+                        if(line.trim()) try { currentRawEdges.push(JSON.parse(line)); } catch(e){}
+                    }
+                }
+                if(buffer.trim()) try { currentRawEdges.push(JSON.parse(buffer)); } catch(e){}
+                
+                document.getElementById('status').innerText = `Đã tải: ${currentRawEdges.length} dòng`;
+                applyFiltersAndRender();
+            } catch(e) { if(e.name !== 'AbortError') document.getElementById('status').innerText = "Lỗi tải"; }
+        }
+
+        function updateFilters() {
+            let maxS = document.getElementById('rangeSpeed').value;
+            let minC = document.getElementById('rangeCount').value;
+            document.getElementById('valSpeed').innerText = maxS == 60 ? "All" : "< "+maxS;
+            document.getElementById('valCount').innerText = ">= "+minC;
+            
+            if(window.t) clearTimeout(window.t);
+            window.t = setTimeout(applyFiltersAndRender, 200);
+        }
+
+        function applyFiltersAndRender() {
+            layerEdges.clearLayers();
+            let maxS = parseInt(document.getElementById('rangeSpeed').value);
+            let minC = parseInt(document.getElementById('rangeCount').value);
+            
+            let filtered = currentRawEdges.filter(e => e.c >= minC && (maxS == 60 || e.s <= maxS));
+            
+            // Stats
+            let sumS=0, cong=0, trips=0;
+            filtered.forEach(e => { sumS+=e.s; trips+=e.c; if(e.s<15) cong++; });
+            document.getElementById('statEdges').innerText = filtered.length;
+            document.getElementById('statSpeed').innerText = filtered.length ? (sumS/filtered.length).toFixed(1) : 0;
+            document.getElementById('statCongested').innerText = cong;
+            document.getElementById('statTrips').innerText = trips.toLocaleString();
+
+            // Draw Chunk
+            let chunk=2000, idx=0;
+            function draw() {
+                let cnt=0;
+                while(idx < filtered.length && cnt < chunk) {
+                    let e = filtered[idx++];
+                    let n1 = nodesMeta[e.f], n2 = nodesMeta[e.t];
+                    if(n1 && n2) {
+                        let s = Math.max(0, Math.min(50, e.s));
+                        let color = `hsl(${(s/50)*120}, 100%, 50%)`; // Đỏ -> Xanh
+                        let weight = Math.min(6, 1.5 + e.c*0.3);
+                        L.polyline([[n1.lat,n1.lng], [n2.lat,n2.lng]], {
+                            color: color, weight: weight, opacity: 0.8, renderer: myRenderer, interactive: true
+                        }).bindPopup(`<div style="text-align:center"><b>${n1.name} ➝ ${n2.name}</b><br>Vận tốc: ${e.s} km/h<br>Lượt: ${e.c}</div>`).addTo(layerEdges);
+                        cnt++;
+                    }
+                }
+                if(idx < filtered.length) requestAnimationFrame(draw);
+            }
+            draw();
+        }
+        init();
+    </script>
+</body>
+</html>
