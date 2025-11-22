@@ -1,11 +1,3 @@
-# Script folder — hướng dẫn nhanh
-
-File này mô tả các script có trong thư mục `script/` và cách sử dụng chúng. Tập trung chỉ vào mã (không giới thiệu về dữ liệu).
-
-**Mục tiêu**
-- Giúp bạn hiểu chức năng từng script và thứ tự chạy điển hình.
-- Cung cấp lệnh mẫu (PowerShell) để chạy từng bước từ thư mục `script/`.
-
 **Các file chính trong `script/`**
 - `main.py` — entry tiện lợi cho pipeline mẫu. Thường gọi `genFullMap.create_sharded_traffic_map()` rồi `app.main()`.
 - `genCluster.py` — gom nhóm (clustering) các điểm dừng từ `HCMC_bus_routes/*` bằng DBSCAN; hàm chính: `group_stops_nested_structure(root_folder, output_file, radius_meters)`; kết quả mặc định: `grouped_stops_nested.csv`.
@@ -80,7 +72,3 @@ python .\main.py
 - Lỗi thiếu module -> `pip install <package>`.
 - Lỗi file không tìm thấy -> kiểm tra bạn đang `cd` vào `script/` trước khi chạy, hoặc chỉnh đường dẫn file.
 - Nếu dữ liệu GPS có timestamp không chuẩn, kiểm tra cột `datetime` trong file CSV đầu vào.
-
----
-
-Muốn tôi làm tiếp: tạo `requirements.txt` dựa trên phụ thuộc, hoặc cập nhật README này sang tiếng Anh?
